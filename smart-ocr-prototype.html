@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart OCR v1 prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f4f6f6; --panel: #ffffff; --text: #1f2e33; --muted: #55656b;
+  --primary: #005b8d; --primary-ink: #ffffff; --ai: #099197; --ai-tint: #e4f2f2;
+  --line: #c9cdc6; --input-border: #7a8a90; --warn-tint: #fbf1de; --warn-ink: #7a4a00;
+  --error: #b3261e; --ok: #1b6e3a; --box: rgba(9,145,151,0.18);
+  --read-box: #005b8d; --read-halo: #ffffff;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1719; --panel: #172226; --text: #e3eaec; --muted: #a3b2b7;
+    --primary: #5fb3e3; --primary-ink: #0b1a22; --ai: #4cc2c7; --ai-tint: #173235;
+    --line: #34444a; --input-border: #7f9298; --warn-tint: #3a2e17; --warn-ink: #f2cf8b;
+    --error: #ff8a80; --ok: #7fd49b; --box: rgba(76,194,199,0.22);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1719; --panel: #172226; --text: #e3eaec; --muted: #a3b2b7;
+  --primary: #5fb3e3; --primary-ink: #0b1a22; --ai: #4cc2c7; --ai-tint: #173235;
+  --line: #34444a; --input-border: #7f9298; --warn-tint: #3a2e17; --warn-ink: #f2cf8b;
+  --error: #ff8a80; --ok: #7fd49b; --box: rgba(76,194,199,0.22);
+  color-scheme: dark;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 24px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; margin-bottom: 16px; }
+h1 { font-size: 24px; font-weight: 600; margin: 0; }
+.sub { color: var(--muted); font-size: 14px; margin: 0; }
+.banner { border: 1px solid var(--warn-ink); background: var(--warn-tint); color: var(--warn-ink); padding: 10px 16px; margin-bottom: 24px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: 7fr 5fr; gap: 24px; align-items: start; }
+@media (max-width: 1023px) { .grid { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); }
+.panel-head { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 52px; }
+.panel-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+/* preview */
+.drop { margin: 16px; border: 2px dashed var(--input-border); border-radius: 6px; min-height: 420px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; }
+.drop.over { border-color: var(--primary); background: var(--ai-tint); }
+.stage { position: relative; margin: 16px; }
+.stage img { display: block; width: 100%; height: auto; }
+.pscroll { max-height: 78vh; overflow: auto; }
+.pbox { position: absolute; border: 2px solid var(--read-box); box-shadow: 0 0 0 1px var(--read-halo), inset 0 0 0 1px var(--read-halo); border-radius: 0; pointer-events: none; display: none; opacity: 0; }
+.pbox.on { display: block; animation: boxin 150ms ease-out forwards; }
+@keyframes boxin { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .pbox.on { animation: none; opacity: 1; } }
+@media (forced-colors: active) { .pbox { border-color: Highlight; box-shadow: none; } }
+/* fields */
+form { padding: 16px; display: grid; gap: 20px; }
+.field label { display: block; font-weight: 500; margin-bottom: 6px; }
+.row { display: flex; gap: 8px; align-items: stretch; }
+.row input { flex: 1; min-width: 0; min-height: 44px; padding: 8px 12px; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--input-border); border-radius: 6px; }
+.row input.ai { background: var(--ai-tint); }
+.row input[aria-invalid="true"] { border-color: var(--error); }
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 6px; padding: 2px 8px; border-radius: 6px; }
+.tag svg { width: 14px; height: 14px; flex: none; }
+.tag.ai { background: var(--ai-tint); color: var(--text); }
+.tag.ai svg { color: var(--ai); }
+.tag.edited { border: 1px solid var(--line); color: var(--text); }
+.tag.none { background: var(--warn-tint); color: var(--warn-ink); }
+.airead { font-size: 13px; color: var(--muted); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.err { color: var(--error); font-size: 13px; margin-top: 6px; }
+.skel { min-height: 44px; border-radius: 6px; background: linear-gradient(90deg, var(--ai-tint) 0%, var(--panel) 50%, var(--ai-tint) 100%); background-size: 200% 100%; animation: sh 1.4s linear infinite; }
+@keyframes sh { from { background-position: 200% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+button { font: inherit; min-height: 44px; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+.btn-primary { background: var(--primary); color: var(--primary-ink); border: 1px solid var(--primary); font-weight: 500; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-quiet { background: transparent; color: var(--primary); border: 1px solid var(--input-border); }
+.linkbtn { background: none; border: 0; color: var(--primary); padding: 0 2px; min-height: 32px; text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.status { font-size: 14px; color: var(--muted); min-height: 21px; }
+.status.ok { color: var(--ok); }
+.status.bad { color: var(--error); }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+/* insights */
+.insights { margin-top: 24px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border-bottom: 1px solid var(--line); }
+.stat { padding: 16px; border-right: 1px solid var(--line); }
+.stat:last-child { border-right: 0; }
+.stat .big { font-size: 28px; font-weight: 600; }
+.stat .small { font-size: 13px; color: var(--muted); }
+.meter { height: 6px; background: var(--ai-tint); margin-top: 8px; position: relative; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--ai); }
+.meter b { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); left: 80%; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); }
+td .ai-v { color: var(--muted); font-size: 12px; }
+.empty { padding: 16px; color: var(--muted); }
+.yes { color: var(--ok); } .no { color: var(--error); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Prescription digitisation</h1>
+    <p class="sub">Smart OCR v1 prototype: the AI pre-fills three fields, you check and save.</p>
+  </header>
+  <div class="banner" role="note">Synthetic test data only. Do not upload real patient prescriptions.</div>
+
+  <div class="grid">
+    <section class="panel" aria-labelledby="pv-h">
+      <div class="panel-head">
+        <h2 id="pv-h">Prescription</h2>
+        <span id="fname" class="mono hint"></span>
+      </div>
+      <div id="drop" class="drop">
+        <p style="margin:0">Drop a single-page prescription here</p>
+        <p class="hint">JPG or PNG. Use the files in the synthetic test set.</p>
+        <button type="button" class="btn-quiet" id="pick">Choose a file</button>
+        <input id="file" type="file" accept="image/jpeg,image/png" class="visually-hidden" tabindex="-1">
+      </div>
+      <div id="pscroll" class="pscroll">
+      <div id="stage" class="stage" hidden>
+        <img id="img" alt="">
+        <div class="pbox" id="box" aria-hidden="true"></div>
+      </div>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="f-h">
+      <div class="panel-head">
+        <h2 id="f-h">Fields</h2>
+        <span class="hint">Click or tab into a field to see where it was read</span>
+      </div>
+      <form id="form" novalidate>
+        <div id="fields"></div>
+        <div class="actions">
+          <button type="submit" class="btn-primary" id="save" disabled>Save prescription</button>
+          <button type="button" class="btn-quiet" id="reset" hidden>Start over</button>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel insights" aria-labelledby="in-h">
+    <div class="panel-head">
+      <h2 id="in-h">How the AI is doing</h2>
+      <span class="hint" id="store-note"></span>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="tablewrap"><table id="tbl"></table></div>
+  </section>
+</div>
+
+<script>
+(function () {
+  const FIELDS = [
+    { key: "date", label: "Date", hint: "DD/MM/YYYY" },
+    { key: "doctorName", label: "Doctor name" },
+    { key: "patientName", label: "Patient name" },
+  ];
+  // Expected answers for the synthetic test set (fictional data), used to score the AI.
+  const GOLDEN = {
+    "rx01.jpg": ["10/11/2025","Aravind Rao","Rahul Mehta"], "rx02.jpg": ["10/11/2025","Meera Iyer","Kavya Menon"],
+    "rx03.jpg": ["12/11/2025","Farhan Siddiqui","Aarav Gupta"], "rx04.jpg": ["14/11/2025","Aravind Rao","Rohit Sharma"],
+    "rx05.jpg": ["15/11/2025","Neha Kapoor","Vikram Singh"], "rx06.jpg": ["16/11/2025","Sandeep Kulkarni","Priya Nair"],
+    "rx07.jpg": ["","Aravind Rao","Ananya Das"], "rx08.jpg": ["03/04/2025","Meera Iyer","Imran Qureshi"],
+    "rx09.jpg": ["18/11/2025","Neha Kapoor","Ankit Verma"], "rx10.jpg": ["19/11/2025","Farhan Siddiqui","Sara Thomas"],
+    "rx11.jpg": ["20/11/2025","Sandeep Kulkarni","Deepak Joshi"], "rx12.jpg": ["21/11/2025","Neha Kapoor","Lakshmi Reddy"],
+    "rx13.jpg": ["22/11/2025","Sunita Rao","Rakesh Yadav"], "rx14.jpg": ["24/11/2025","Alok Verma","Meena Kumari"],
+    "rx15.jpg": ["25/11/2025","Pooja Desai","Arjun Malhotra"], "rx16.jpg": ["26/11/2025","Vivek Anand","Gurpreet Kaur"],
+    "rx17.jpg": ["12/11/2025","Harish Menon","Mohammed Salim"], "rx18.jpg": ["29/11/2025","Nisha Bansal","Pooja Saini"],
+    "rx19.jpg": ["05/12/2025","Imran Khan","Ritu Sharma"], "rx20.jpg": ["08/12/2025","Geeta Pillai","Sanjay Prakash"],
+  };
+  const ICON = {
+    ai: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0l1.6 4.4L14 6 9.6 7.6 8 12 6.4 7.6 2 6l4.4-1.6zM13 10l.8 2.2L16 13l-2.2.8L13 16l-.8-2.2L10 13l2.2-.8z"/></svg>',
+    edited: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M11.7 1.3l3 3L5 14H2v-3zM10.3 4.1l1.6 1.6"/></svg>',
+    none: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.8 3h1.6v5H7.2zm0 6.4h1.6V12H7.2z"/></svg>',
+  };
+  const $ = (id) => document.getElementById(id);
+  const norm = (v) => String(v || "").toLowerCase().replace(/\s+/g, " ").trim();
+  let state = null, sample = null, db = null, records = [], localOnly = [];
+
+  function validDate(s) {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s); if (!m) return false;
+    const d = +m[1], mo = +m[2], y = +m[3]; const dt = new Date(y, mo - 1, d);
+    return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+  }
+
+  function renderFields() {
+    const host = $("fields"); host.innerHTML = "";
+    if (!state) { host.innerHTML = '<p class="hint">Upload a prescription to start.</p>'; return; }
+    for (const f of FIELDS) {
+      const wrap = document.createElement("div"); wrap.className = "field";
+      const fs = state.fields[f.key];
+      if (state.reading) {
+        wrap.innerHTML = `<label>${f.label}</label><div class="skel" aria-hidden="true"></div>`;
+        host.append(wrap); continue;
+      }
+      const status = fs.ai === "" && fs.final === "" ? "none" : fs.final === fs.ai ? (fs.ai === "" ? "none" : "ai") : "edited";
+      const id = "in-" + f.key;
+      wrap.innerHTML = `
+        <label for="${id}">${f.label}${f.hint ? ' <span class="hint">(' + f.hint + ')</span>' : ""}</label>
+        <div class="row"><input id="${id}" class="${status === "ai" ? "ai" : ""} ${f.key === "date" ? "mono" : ""}" autocomplete="off"
+          aria-describedby="${id}-tag ${id}-err ${id}-hl"></div>
+        <div id="${id}-tag"></div><div id="${id}-err" class="err"></div><span id="${id}-hl" class="visually-hidden">${state.boxes[f.key] ? "Highlighted on the prescription image" : ""}</span>`;
+      host.append(wrap);
+      const input = wrap.querySelector("input"); input.value = fs.final;
+      const tag = wrap.querySelector("#" + id + "-tag");
+      if (status === "ai") tag.innerHTML = `<span class="tag ai">${ICON.ai}AI-filled</span>`;
+      else if (status === "none") tag.innerHTML = `<span class="tag none">${ICON.none}Not detected. Type it in.</span>`;
+      else {
+        tag.innerHTML = `<span class="tag edited">${ICON.edited}Edited</span>` +
+          `<div class="airead">AI read: <span class="${f.key === "date" ? "mono" : ""}"></span>` +
+          `<button type="button" class="linkbtn">Revert to AI value</button></div>`;
+        tag.querySelector(".airead span").textContent = fs.ai === "" ? "(nothing)" : fs.ai;
+        tag.querySelector(".linkbtn").onclick = () => { fs.final = fs.ai; fs.reverted = true; renderFields(); document.getElementById(id).focus(); };
+      }
+      if (state.errors[f.key]) { input.setAttribute("aria-invalid", "true"); wrap.querySelector(".err").textContent = state.errors[f.key]; }
+      input.addEventListener("input", () => {
+        const before = fs.final === fs.ai; fs.final = input.value; delete state.errors[f.key];
+        const after = fs.final === fs.ai; if (before !== after) { const pos = input.selectionStart; renderFields(); const el = document.getElementById(id); el.focus(); el.setSelectionRange(pos, pos); }
+      });
+      input.addEventListener("focus", () => showBox(f.key, true));
+      input.addEventListener("blur", () => showBox(f.key, false));
+    }
+    $("save").disabled = !!state.reading;
+  }
+
+  function showBox(key, on) {
+    const el = $("box"); const b = state && state.boxes[key];
+    el.classList.remove("on");
+    if (!on || !b) return;
+    const [x0, y0, x1, y1] = b.map((n) => Math.max(0, Math.min(1, Number(n) || 0)));
+    if (x1 <= x0 || y1 <= y0) return;
+    el.style.left = `calc(${x0 * 100}% - 4px)`; el.style.top = `calc(${y0 * 100}% - 4px)`;
+    el.style.width = `calc(${(x1 - x0) * 100}% + 8px)`; el.style.height = `calc(${(y1 - y0) * 100}% + 8px)`;
+    void el.offsetWidth; el.classList.add("on");
+    const sc = $("pscroll"), r = el.getBoundingClientRect(), s = sc.getBoundingClientRect();
+    if (r.top < s.top || r.bottom > s.bottom) {
+      const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      sc.scrollTo({ top: sc.scrollTop + (r.top - s.top) - 16, behavior: reduce ? "auto" : "smooth" });
+    }
+  }
+
+  // Match score per field (spec Slice 5): exact match after tidying, plus character-level similarity.
+  const tidy = (v) => String(v || "").trim().replace(/\s+/g, " ").toLowerCase();
+  function lev(a, b) {
+    const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      let prev = d[0]; d[0] = i;
+      for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+    }
+    return d[b.length];
+  }
+  function matchScore(key, ai, fin) {
+    const a = tidy(ai), f = tidy(fin);
+    const similarity = !a && !f ? 100 : Math.round((1 - lev(a, f) / Math.max(a.length, f.length)) * 100);
+    const exact = key === "date" ? (validDate(String(ai || "").trim()) && String(ai).trim() === String(fin).trim()) || (!a && !f) : a === f;
+    return { exactMatch: exact ? "yes" : "no", similarity };
+  }
+
+  function setStatus(msg, kind) { const s = $("status"); s.textContent = msg; s.className = "status" + (kind ? " " + kind : ""); }
+
+  function resetAll() {
+    state = null; $("stage").hidden = true; $("drop").hidden = false; $("fname").textContent = ""; $("img").removeAttribute("src");
+    $("reset").hidden = true; $("save").disabled = true; renderFields();
+  }
+
+  const PROMPT = `You are reading a photo of a printed, single-page medical prescription from India.
+Extract exactly three fields:
+- date: the date of this visit, written as DD/MM/YYYY (day first, as used in India). If several dates appear, use the visit date, not a follow-up or review date. If no date is printed, use "".
+- doctorName: the treating doctor's name only, without "Dr." and without degrees. Ignore referring doctors and hospital or clinic names.
+- patientName: the patient's name only, without titles such as Mr, Mrs or Ms, in normal capitalisation (for example "Priya Nair", not "PRIYA NAIR").
+Never guess. If you cannot read a field, use "".
+For each field also give the box where you read it on the image, as [x0, y0, x1, y1] fractions of the image width and height, measured from the top-left corner. Use null if the field was not found.
+Reply with only this JSON:
+{"date":{"value":"","box":null},"doctorName":{"value":"","box":null},"patientName":{"value":"","box":null}}`;
+
+  async function handleFile(file) {
+    if (!file) return;
+    if (!/^image\/(jpeg|png)$/.test(file.type)) { setStatus("Please upload a JPG or PNG prescription.", "bad"); return; }
+    const url = URL.createObjectURL(file);
+    $("img").src = url; $("img").alt = "Uploaded prescription: " + file.name;
+    $("drop").hidden = true; $("stage").hidden = false; $("fname").textContent = file.name; $("reset").hidden = false;
+    state = { fileName: file.name, uploadedAt: Date.now(), reading: true, errors: {}, boxes: {},
+      fields: { date: { ai: "", final: "" }, doctorName: { ai: "", final: "" }, patientName: { ai: "", final: "" } } };
+    renderFields(); setStatus("Reading prescription…");
+    if (!sample) { state.reading = false; renderFields(); setStatus("AI reading isn't available here. Type the three fields and save.", "bad"); return; }
+    const mine = state;
+    try {
+      const out = await Promise.race([
+        sample.json(PROMPT, { images: [file], cache: false }),
+        new Promise((_, reject) => setTimeout(() => reject({ code: "timeout" }), 30000)),
+      ]);
+      if (state !== mine) return;
+      for (const f of FIELDS) {
+        const v = out && out[f.key] ? String(out[f.key].value || "").trim() : "";
+        state.fields[f.key].ai = v; state.fields[f.key].final = v;
+        const b = out && out[f.key] && Array.isArray(out[f.key].box) && out[f.key].box.length === 4 ? out[f.key].box : null;
+        state.boxes[f.key] = b;
+      }
+      setStatus("Check each field against the prescription, then save.");
+    } catch (e) {
+      if (state !== mine) return;
+      const why = { timeout: "The AI didn't answer within 30 seconds.", not_granted: "AI reading was not allowed.", rate_limited: "Too many requests. Wait a minute and upload again.",
+        image_rejected: "The image couldn't be read. Try a different file.", refused: "The AI declined this image." }[e && e.code] || "The AI couldn't read this prescription.";
+      setStatus(why + " The fields are empty, so type them in and save.", "bad");
+    }
+    state.reading = false; renderFields();
+  }
+
+  $("pick").onclick = () => $("file").click();
+  $("file").onchange = (e) => { handleFile(e.target.files[0]); e.target.value = ""; };
+  const drop = $("drop");
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); handleFile(e.dataTransfer.files[0]); });
+  $("reset").onclick = () => { resetAll(); setStatus(""); };
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault(); if (!state || state.reading) return;
+    state.errors = {};
+    const d = state.fields.date.final.trim();
+    if (d && !validDate(d)) state.errors.date = "Enter a real date as DD/MM/YYYY.";
+    if (Object.keys(state.errors).length) { renderFields(); document.getElementById("in-date").focus(); return; }
+    const gold = GOLDEN[state.fileName.toLowerCase()];
+    const rec = { fileName: state.fileName, uploadedAt: state.uploadedAt, savedAt: Date.now(),
+      seconds: Math.round((Date.now() - state.uploadedAt) / 1000), fields: {} };
+    FIELDS.forEach((f, i) => {
+      const fs = state.fields[f.key]; const fin = fs.final.trim();
+      rec.fields[f.key] = { ai: fs.ai, final: fin, status: fin === fs.ai ? (fs.reverted ? "edited then reverted" : "accepted as read") : "edited",
+        expected: gold ? gold[i] : null, aiCorrect: gold ? norm(fs.ai) === norm(gold[i]) : null };
+      Object.assign(rec.fields[f.key], matchScore(f.key, fs.ai, fin));
+    });
+    $("save").disabled = true;
+    try {
+      if (db) await db.collection("records").doc().set(rec); else { localOnly.unshift(rec); renderInsights(localOnly); }
+      resetAll(); setStatus("Prescription saved.", "ok");
+    } catch (err) { $("save").disabled = false; setStatus("Couldn't save. Your values are still here; try again.", "bad"); }
+  });
+
+  function pct(a, b) { return b ? Math.round((a / b) * 100) : null; }
+  function renderInsights(list) {
+    records = list;
+    const n = list.length; let kept = 0, total = 0, gTot = 0, gOk = 0, secs = 0; const per = {};
+    FIELDS.forEach((f) => (per[f.key] = { kept: 0, n: 0 }));
+    for (const r of list) {
+      secs += r.seconds || 0;
+      for (const f of FIELDS) {
+        const x = r.fields && r.fields[f.key]; if (!x) continue;
+        total++; per[f.key].n++;
+        if (x.status !== "edited") { kept++; per[f.key].kept++; }
+        if (x.aiCorrect !== null && x.aiCorrect !== undefined) { gTot++; if (x.aiCorrect) gOk++; }
+      }
+    }
+    const k = pct(kept, total), g = pct(gOk, gTot);
+    const stat = (big, small, meter) => `<div class="stat"><div class="big">${big}</div><div class="small">${small}</div>${meter != null ? `<div class="meter" aria-hidden="true"><i style="width:${meter}%"></i><b></b></div>` : ""}</div>`;
+    $("stats").innerHTML =
+      stat(k == null ? "–" : k + "%", "Fields kept as the AI read them (target 80%)", k) +
+      stat(n + " / 50", "Prescriptions saved (target needs 50+)", null) +
+      stat(g == null ? "–" : g + "%", "AI correct against the golden test set (" + gTot + " fields)", g) +
+      stat(n ? Math.round(secs / n) + " s" : "–", "Average time from upload to save", null) +
+      FIELDS.map((f) => stat(pct(per[f.key].kept, per[f.key].n) == null ? "–" : pct(per[f.key].kept, per[f.key].n) + "%", f.label + " kept as read", null)).join("");
+    const tbl = $("tbl");
+    if (!n) { tbl.innerHTML = '<tbody><tr><td class="empty">No prescriptions saved yet. Saved records appear here with the AI value next to the final value.</td></tr></tbody>'; return; }
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    tbl.innerHTML = "<thead><tr><th>File</th>" + FIELDS.map((f) => `<th>${f.label}</th>`).join("") + "<th>Time</th></tr></thead><tbody>" +
+      list.map((r) => "<tr><td class='mono'>" + esc(r.fileName) + "</td>" + FIELDS.map((f) => {
+        const x = (r.fields || {})[f.key] || {};
+        const mark = x.aiCorrect === true ? ' <span class="yes">AI correct</span>' : x.aiCorrect === false ? ' <span class="no">AI wrong</span>' : "";
+        return `<td>${esc(x.final) || "<span class='hint'>(empty)</span>"}<div class="ai-v">AI: ${esc(x.ai) || "(nothing)"}. ${esc(x.status)}${x.exactMatch ? ". Match: " + esc(x.exactMatch) + ", " + esc(x.similarity) + "%" : ""}${mark}</div></td>`;
+      }).join("") + "<td>" + esc(r.seconds) + " s</td></tr>").join("") + "</tbody>";
+  }
+
+  renderFields(); renderInsights([]);
+  (async () => {
+    if (!window.claude || !window.claude.use) { $("store-note").textContent = "Saved records stay on this screen only."; return; }
+    sample = await window.claude.use("sample");
+    db = await window.claude.use("db");
+    if (db) {
+      $("store-note").textContent = "Saved records are kept with this page.";
+      const timer = setTimeout(() => { $("store-note").textContent = "Saved records couldn't load. New saves may not be kept."; }, 10000);
+      db.collection("records").orderBy("savedAt", "desc").onSnapshot((snap) => {
+        clearTimeout(timer); renderInsights(snap.docs.map((d) => d.data()));
+      }, () => { clearTimeout(timer); db = null; $("store-note").textContent = "Saved records stay on this screen only."; });
+    } else $("store-note").textContent = "Saved records stay on this screen only.";
+  })();
+})();
+</script>
+</body>
+</html>
